@@ -1,0 +1,7 @@
+---
+- name: Dev base setup
+  hosts: all
+  become: true
+
+  roles:
+    - common

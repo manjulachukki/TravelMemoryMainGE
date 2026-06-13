@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: travelmemory
+  labels:
+    app: travelmemory
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: travelmemory
+      tier: backend
+  template:
+    metadata:
+      labels:
+        app: travelmemory
+        tier: backend
+    spec:
+      containers:
+        - name: backend
+          image: <AWS_ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/travelmemory-backend:latest
+          ports:
+            - containerPort: 3001
+          env:
+            - name: PORT
+              value: "3001"
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: travelmemory-secrets
+                  key: mongo-uri
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /hello
+              port: 3001
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /hello
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 5

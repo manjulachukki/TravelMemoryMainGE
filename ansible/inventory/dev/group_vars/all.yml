@@ -1,0 +1,6 @@
+env: dev
+
+common_packages:
+  - curl
+  - vim
+  - git

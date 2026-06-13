@@ -7,3 +7,49 @@
 - name: Set timezone
   timezone:
     name: Asia/Kolkata
+
+- name: Add Docker GPG key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Add Docker repository
+  apt_repository:
+    repo: "deb https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+
+- name: Install Docker
+  apt:
+    name: "{{ docker_packages }}"
+    state: present
+    update_cache: yes
+
+- name: Start and enable Docker
+  service:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Add user to docker group
+  user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: yes
+
+- name: Install kubectl
+  get_url:
+    url: "https://dl.k8s.io/release/v{{ kubectl_version }}/bin/linux/amd64/kubectl"
+    dest: /usr/local/bin/kubectl
+    mode: '0755'
+
+- name: Install AWS CLI v2
+  shell: |
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip"
+    unzip -o /tmp/awscliv2.zip -d /tmp
+    /tmp/aws/install --update
+  args:
+    creates: /usr/local/bin/aws
+
+- name: Configure kubeconfig for EKS
+  shell: "aws eks update-kubeconfig --name {{ eks_cluster_name }} --region {{ aws_region }}"
+  become_user: "{{ ansible_user }}"

@@ -1,6 +1,21 @@
 env: dev
+aws_region: ap-south-1
+eks_cluster_name: travelmemory-eks
 
 common_packages:
   - curl
   - vim
   - git
+  - unzip
+  - apt-transport-https
+  - ca-certificates
+  - gnupg
+  - lsb-release
+  - software-properties-common
+
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+
+kubectl_version: "1.28.0"

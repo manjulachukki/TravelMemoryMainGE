@@ -21,24 +21,32 @@ pipeline {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
                     sh """
+                        set -e
+
+                        # Isolate Docker config to avoid shared Jenkins auth conflicts
+                        export DOCKER_CONFIG=\$(mktemp -d)
+                        trap 'rm -rf \$DOCKER_CONFIG' EXIT
+
+                        # Diagnostic: show which IAM identity Jenkins is using
+                        aws sts get-caller-identity
+
+                        # Login to ECR
                         aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+
+                        # Build and push backend
+                        cd backend
+                        docker build -t ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG} .
+                        docker push ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG}
+                        docker tag ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${BACKEND_REPO}:latest
+                        docker push ${ECR_REGISTRY}/${BACKEND_REPO}:latest
+
+                        # Build and push frontend
+                        cd ../frontend
+                        docker build -t ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG} .
+                        docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG}
+                        docker tag ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
+                        docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
                     """
-                    dir('backend') {
-                        sh """
-                            docker build -t ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG} .
-                            docker push ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG}
-                            docker tag ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${BACKEND_REPO}:latest
-                            docker push ${ECR_REGISTRY}/${BACKEND_REPO}:latest
-                        """
-                    }
-                    dir('frontend') {
-                        sh """
-                            docker build -t ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG} .
-                            docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG}
-                            docker tag ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
-                            docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
-                        """
-                    }
                 }
             }
         }

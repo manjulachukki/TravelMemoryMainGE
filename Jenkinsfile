@@ -3,6 +3,7 @@ pipeline {
 
     environment {
         AWS_REGION       = 'ap-south-1'
+        AWS_ACCOUNT_ID   = '975050024946'
         ECR_REGISTRY     = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
         BACKEND_REPO     = 'travelmemory-backend'
         FRONTEND_REPO    = 'travelmemory-frontend'
@@ -19,7 +20,7 @@ pipeline {
 
         stage('Build & Push Docker Images') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials-groupe']]) {
                     sh """
                         set -e
 
@@ -27,7 +28,7 @@ pipeline {
                         export DOCKER_CONFIG=\$(mktemp -d)
                         trap 'rm -rf \$DOCKER_CONFIG' EXIT
 
-                        # Diagnostic: show which IAM identity Jenkins is using
+                        # Verify correct IAM identity
                         aws sts get-caller-identity
 
                         # Login to ECR
@@ -53,7 +54,7 @@ pipeline {
 
         stage('Deploy to EKS') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials-groupe']]) {
                     sh """
                         aws eks update-kubeconfig --name ${EKS_CLUSTER_NAME} --region ${AWS_REGION}
                         kubectl apply -f k8s/namespace.yml
@@ -69,7 +70,7 @@ pipeline {
 
         stage('Deploy Monitoring') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials-groupe']]) {
                     sh """
                         kubectl apply -f monitoring/namespace.yml
                         kubectl apply -f monitoring/prometheus-config.yml
@@ -82,7 +83,7 @@ pipeline {
 
         stage('Verify Deployment') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials-groupe']]) {
                     sh """
                         kubectl rollout status deployment/backend -n travelmemory --timeout=120s
                         kubectl rollout status deployment/frontend -n travelmemory --timeout=120s

@@ -57,6 +57,11 @@ pipeline {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials-groupe']]) {
                     sh """
                         aws eks update-kubeconfig --name ${EKS_CLUSTER_NAME} --region ${AWS_REGION}
+
+                        # Update image tags to use this build number
+                        sed -i 's|travelmemory-backend:latest|travelmemory-backend:${IMAGE_TAG}|g' k8s/backend-deployment.yml
+                        sed -i 's|travelmemory-frontend:latest|travelmemory-frontend:${IMAGE_TAG}|g' k8s/frontend-deployment.yml
+
                         kubectl apply -f k8s/namespace.yml
                         kubectl apply -f k8s/backend-deployment.yml
                         kubectl apply -f k8s/backend-service.yml

@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: <AWS_ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/travelmemory-frontend:latest
+          image: 975050024946.dkr.ecr.ap-south-1.amazonaws.com/travelmemory-frontend:latest
           ports:
             - containerPort: 3000
           env:

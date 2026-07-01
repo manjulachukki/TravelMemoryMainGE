@@ -62,9 +62,27 @@ pipeline {
                         sed -i 's|travelmemory-backend:latest|travelmemory-backend:${IMAGE_TAG}|g' k8s/backend-deployment.yml
                         sed -i 's|travelmemory-frontend:latest|travelmemory-frontend:${IMAGE_TAG}|g' k8s/frontend-deployment.yml
 
+                        # Deploy backend first (service + deployment)
                         kubectl apply -f k8s/namespace.yml
                         kubectl apply -f k8s/backend-deployment.yml
                         kubectl apply -f k8s/backend-service.yml
+
+                        # Wait for backend LoadBalancer to get an external hostname
+                        echo "Waiting for backend LoadBalancer..."
+                        for i in \$(seq 1 30); do
+                            BACKEND_HOST=\$(kubectl get svc backend-service -n travelmemory -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+                            if [ -n "\$BACKEND_HOST" ]; then
+                                echo "Backend LB hostname: \$BACKEND_HOST"
+                                break
+                            fi
+                            sleep 10
+                        done
+
+                        # Update frontend deployment with the real backend URL
+                        if [ -n "\$BACKEND_HOST" ]; then
+                            sed -i "s|http://backend-service:3001|http://\${BACKEND_HOST}:3001|g" k8s/frontend-deployment.yml
+                        fi
+
                         kubectl apply -f k8s/frontend-deployment.yml
                         kubectl apply -f k8s/frontend-service.yml
                         kubectl apply -f k8s/hpa.yml

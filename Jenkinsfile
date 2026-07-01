@@ -3,7 +3,6 @@ pipeline {
 
     environment {
         AWS_REGION       = 'ap-south-1'
-        AWS_ACCOUNT_ID   = credentials('aws-account-id')
         ECR_REGISTRY     = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
         BACKEND_REPO     = 'travelmemory-backend'
         FRONTEND_REPO    = 'travelmemory-frontend'

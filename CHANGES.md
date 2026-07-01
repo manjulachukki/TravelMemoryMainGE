@@ -589,18 +589,16 @@ Since you cannot SSH into the hosted Jenkins server, AWS credentials must be con
 
 > **Note:** Since this is a pre-configured hosted instance, initial setup (plugins, admin user creation) has already been done by the administrator. Skip directly to adding credentials.
 
-#### 7.2 — Install Additional Required Plugins
+#### 7.2 — Verify Required Plugins Are Available
 
-1. Go to **Dashboard → Manage Jenkins → Plugins → Available plugins**
-2. Search for and check each of these plugins:
+Since this is a hosted Jenkins instance, the required plugins should already be installed by the administrator. You can verify by going to **Dashboard → Manage Jenkins → Plugins → Installed plugins** and checking for:
    - **Docker Pipeline** — allows Jenkins to build Docker images
    - **Kubernetes CLI** — allows Jenkins to run kubectl commands
    - **AWS Credentials** — securely stores AWS keys
    - **Pipeline: AWS Steps** — AWS integration for pipelines
    - **AnsiColor** — shows colored output (makes Ansible logs readable)
-3. Click **"Install without restart"**
-4. Check **"Restart Jenkins when installation is complete..."** at the bottom
-5. Wait for Jenkins to restart, then log back in
+
+> **Note:** If any plugin is missing and you don't have permission to install it, contact your HeroVired instructor/admin to request installation.
 
 #### 7.3 — Add AWS Credentials to Jenkins
 

@@ -781,32 +781,20 @@ aws ecr describe-repositories --region ap-south-1 --query "repositories[].reposi
 
 ---
 
-### Step 10: Update Ansible Inventory with Actual IP
+### Step 10: Ansible Inventory — Skip (Hosted Jenkins)
 
-**What you're doing:** Telling Ansible which server to configure. Since Jenkins is hosted externally (`https://jenkinsacademics.herovired.com`), the Ansible inventory should point to any EC2 worker nodes you manage (e.g., EKS worker nodes or a bastion host). If Ansible configuration is handled entirely within the Jenkins pipeline (which runs on the hosted Jenkins server), you may skip this step.
+**What this step would do:** In a self-hosted Jenkins setup, you'd SSH into the Jenkins EC2 instance and use Ansible to install Docker, kubectl, AWS CLI, and Terraform on it. The `ansible/inventory/dev/hosts.ini` file tells Ansible which server to configure.
 
-#### 10.1 — Get the Target EC2 Instance Public IP
-```bash
-# List running EC2 instances in your account
-aws ec2 describe-instances \
-  --filters "Name=instance-state-name,Values=running" \
-  --query "Reservations[].Instances[].[Tags[?Key=='Name'].Value|[0],PublicIpAddress]" \
-  --output table \
-  --region ap-south-1
-```
+**Why you can skip this:** You're using the hosted Jenkins at `https://jenkinsacademics.herovired.com`, which already has all required tools (Docker, kubectl, AWS CLI, Terraform, Ansible) pre-installed by the administrator. There is no EC2 instance you need to manually configure. The EKS worker nodes are managed by AWS and auto-configure themselves.
 
-#### 10.2 — Edit the Ansible Inventory File
-Open `ansible/inventory/dev/hosts.ini` and replace the placeholder IP with the target instance:
+> **Note:** The Ansible stage in the Jenkinsfile (`Stage 4: Ansible - Configure Infrastructure`) may fail or be unnecessary when running the pipeline. If it fails, you can safely comment out that stage in the Jenkinsfile since the hosted Jenkins server is already configured.
 
+The `hosts.ini` file currently contains a placeholder:
 ```ini
-[webservers]
-<YOUR_EC2_IP> ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/jenkins-key.pem
-
-[all:vars]
-ansible_python_interpreter=/usr/bin/python3
+[all]
+dev-node-1 ansible_host=10.0.0.10 ansible_user=ec2-user
 ```
-
-> **Note:** If the hosted Jenkins pipeline handles Ansible execution, you'll need to ensure the SSH private key is added as a Jenkins credential (Kind: SSH Username with private key) so the pipeline can reach your target servers.
+You can leave this as-is — it won't affect other stages of the pipeline.
 
 ---
 
@@ -820,16 +808,15 @@ ansible_python_interpreter=/usr/bin/python3
 aws eks update-kubeconfig --name travelmemory-eks --region ap-south-1
 
 # Expected output:
-# Added new context arn:aws:eks:ap-south-1:123456789012:cluster/travelmemory-eks to /home/user/.kube/config
+Added new context arn:aws:eks:ap-south-1:975050024946:cluster/travelmemory-eks to C:\Users\manjula.chandra\.kube\config
 
 # Verify connection to the cluster
 kubectl get nodes
 
 # Expected output (may take a minute for nodes to be Ready):
 # NAME                                       STATUS   ROLES    AGE   VERSION
-# ip-10-0-3-xxx.ap-south-1.compute.internal  Ready    <none>   10m   v1.28.x
-# ip-10-0-4-xxx.ap-south-1.compute.internal  Ready    <none>   10m   v1.28.x
-```
+ip-10-0-3-159.ap-south-1.compute.internal   Ready    <none>   3d20h   v1.32.13-eks-93b80c6
+ip-10-0-4-144.ap-south-1.compute.internal   Ready    <none>   3d20h   v1.32.13-eks-93b80c6
 
 > **Troubleshooting:** If `kubectl get nodes` shows no nodes or errors:
 > - Wait 5 minutes — nodes take time to join
@@ -851,9 +838,7 @@ kubectl get namespaces | grep travelmemory
 #### 11.3 — Create the MongoDB Secret
 ```bash
 # Replace the connection string below with YOUR MongoDB Atlas connection string from Step 4
-kubectl create secret generic travelmemory-secrets \
-  --from-literal=mongo-uri="mongodb+srv://travelmemory-app:YOUR_PASSWORD@cluster0.xxxxx.mongodb.net/travelmemory?retryWrites=true&w=majority" \
-  -n travelmemory
+kubectl create namespace travelmemory 2>$null; kubectl create secret generic travelmemory-secrets --from-literal=mongo-uri="mongodb+srv://<DB_USER>:<DB_PASSWORD>@<YOUR_CLUSTER>.mongodb.net/?appName=Cluster0" -n travelmemory
 
 # Expected output:
 # secret/travelmemory-secrets created
@@ -918,12 +903,10 @@ Since you're using the hosted Jenkins at `https://jenkinsacademics.herovired.com
 #### 13.2 — What Each Stage Does (Follow Along)
 ```
 Stage 1 - Checkout:           Downloads code from GitHub (~10 seconds)
-Stage 2 - Build Docker:       Builds both Docker images (~2-5 minutes)
-Stage 3 - Terraform:          Provisions infrastructure (~1 minute if already exists)
-Stage 4 - Ansible:            Configures servers (~2-3 minutes)
-Stage 5 - Deploy to EKS:      Applies K8s manifests (~1-2 minutes)
-Stage 6 - Deploy Monitoring:  Deploys Prometheus + Grafana (~1 minute)
-Stage 7 - Verify:             Checks rollout status (~30 seconds)
+Stage 2 - Build & Push:       Builds Docker images and pushes to ECR (~2-5 minutes)
+Stage 3 - Deploy to EKS:      Applies K8s manifests (~1-2 minutes)
+Stage 4 - Deploy Monitoring:  Deploys Prometheus + Grafana (~1 minute)
+Stage 5 - Verify:             Checks rollout status (~30 seconds)
 ```
 
 #### 13.3 — Trigger via Push (Automatic)
@@ -948,14 +931,21 @@ git push origin manjula-capstone-sp1
 #### 14.1 — Check All Pods Are Running
 ```bash
 kubectl get pods -n travelmemory
+kubectl get svc -n travelmemory 2>&1; 
+kubectl get svc -n monitoring 2>&1
 
 # Expected output (all pods should be "Running" with "1/1" READY):
-# NAME                                READY   STATUS    RESTARTS   AGE
-# backend-deployment-xxxxx-yyyyy      1/1     Running   0          5m
-# backend-deployment-xxxxx-zzzzz      1/1     Running   0          5m
-# frontend-deployment-xxxxx-yyyyy     1/1     Running   0          5m
-# frontend-deployment-xxxxx-zzzzz     1/1     Running   0          5m
-```
+NAME                        READY   STATUS    RESTARTS   AGE
+backend-699cd7c9f4-2k89b    1/1     Running   0          6m5s
+backend-699cd7c9f4-zrk4p    1/1     Running   0          5m58s
+frontend-58bfcbcd79-5n7fh   1/1     Running   0          5m24s
+frontend-58bfcbcd79-ldcz2   1/1     Running   0          6m1s
+
+
+NAME               TYPE           CLUSTER-IP      EXTERNAL-IP                                                                PORT(S)        AGE
+backend-service    ClusterIP      172.20.62.40    <none>                                                                     3001/TCP       12m
+frontend-service   LoadBalancer   172.20.237.65   ae7ef063643b547c4a0fd729e584ec8b-1798586256.ap-south-1.elb.amazonaws.com   80:30724/TCP   12m
+
 
 > **Troubleshooting Pod Issues:**
 > ```bash
@@ -988,15 +978,22 @@ kubectl get svc frontend-service -n travelmemory
 2. Open it in your browser: `http://xxxxx.ap-south-1.elb.amazonaws.com`
 3. You should see the TravelMemory application homepage!
 
+- **Frontend App:** `http://ae7ef063643b547c4a0fd729e584ec8b-1798586256.ap-south-1.elb.amazonaws.com`
+
+
 #### 14.4 — Access Monitoring
 ```bash
 kubectl get svc -n monitoring
-
 # Expected output:
 # NAME                  TYPE           CLUSTER-IP    EXTERNAL-IP                              PORT(S)          AGE
 # prometheus-service    LoadBalancer   10.100.x.x    yyyyy.ap-south-1.elb.amazonaws.com      9090:30xxx/TCP   5m
 # grafana-service       LoadBalancer   10.100.x.x    zzzzz.ap-south-1.elb.amazonaws.com      3000:30xxx/TCP   5m
-```
+
+NAME                 TYPE           CLUSTER-IP       EXTERNAL-IP                                                                PORT(S)          AGE
+grafana-service      LoadBalancer   172.20.179.236   acccbf8bcf70f485bbf5554d6bf728e9-916581521.ap-south-1.elb.amazonaws.com    3000:32349/TCP   11m
+prometheus-service   LoadBalancer   172.20.241.124   ab4560667bebf4b3d8a23f8b22a646f7-1341186994.ap-south-1.elb.amazonaws.com   9090:32092/TCP   11m
+
+
 
 - **Prometheus:** Open `http://<prometheus-EXTERNAL-IP>:9090`
   - Try a query: Type `up` in the query box and click "Execute"
@@ -1010,6 +1007,13 @@ kubectl get svc -n monitoring
     - `3119` — Kubernetes cluster monitoring
     - `6417` — Kubernetes pods monitoring
 
+
+Everything is up and running! Here are your URLs:
+
+- **Grafana:** `http://acccbf8bcf70f485bbf5554d6bf728e9-916581521.ap-south-1.elb.amazonaws.com:3000` (admin/admin123)
+- **Prometheus:** `http://ab4560667bebf4b3d8a23f8b22a646f7-1341186994.ap-south-1.elb.amazonaws.com:9090`
+
+The pipeline is fully operational — checkout, Docker build, ECR push, EKS deploy, monitoring deploy, and verification all passing.
 ---
 
 ### Step 15: Cleanup (When You're Done — SAVE MONEY!)

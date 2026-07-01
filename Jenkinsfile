@@ -18,35 +18,26 @@ pipeline {
         }
 
         stage('Build & Push Docker Images') {
-            parallel {
-                stage('Backend') {
-                    steps {
-                        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
-                            dir('backend') {
-                                sh """
-                                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
-                                    docker build -t ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG} .
-                                    docker push ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG}
-                                    docker tag ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${BACKEND_REPO}:latest
-                                    docker push ${ECR_REGISTRY}/${BACKEND_REPO}:latest
-                                """
-                            }
-                        }
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                    sh """
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    """
+                    dir('backend') {
+                        sh """
+                            docker build -t ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG} .
+                            docker push ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG}
+                            docker tag ${ECR_REGISTRY}/${BACKEND_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${BACKEND_REPO}:latest
+                            docker push ${ECR_REGISTRY}/${BACKEND_REPO}:latest
+                        """
                     }
-                }
-                stage('Frontend') {
-                    steps {
-                        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
-                            dir('frontend') {
-                                sh """
-                                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
-                                    docker build -t ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG} .
-                                    docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG}
-                                    docker tag ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
-                                    docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
-                                """
-                            }
-                        }
+                    dir('frontend') {
+                        sh """
+                            docker build -t ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG} .
+                            docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG}
+                            docker tag ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
+                            docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
+                        """
                     }
                 }
             }

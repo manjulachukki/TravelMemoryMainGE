@@ -278,8 +278,8 @@ Complete these items IN ORDER before running the pipeline:
 - [ ] **3.** Create S3 bucket `travelmemory-terraform-state` in `ap-south-1` (for Terraform state)
 - [ ] **4.** Create a free MongoDB Atlas cluster and get the connection string
 - [ ] **5.** Replace `<AWS_ACCOUNT_ID>` in `k8s/backend-deployment.yml` and `k8s/frontend-deployment.yml`
-- [ ] **6.** Launch a Jenkins EC2 instance and install all required tools
-- [ ] **7.** Configure Jenkins credentials (AWS Access Key + Secret Key)
+- [ ] **6.** Log in to hosted Jenkins at https://jenkinsacademics.herovired.com
+- [ ] **7.** Configure Jenkins credentials (AWS Access Key + Secret Key) via Jenkins UI
 - [ ] **8.** Set `AWS_ACCOUNT_ID` environment variable in Jenkins
 - [ ] **9.** Run Terraform to provision the EKS cluster
 - [ ] **10.** Update `ansible/inventory/dev/hosts.ini` with the actual EC2 IP address
@@ -469,63 +469,37 @@ aws s3 ls | grep travelmemory
 
 ---
 
-### Step 5: Create IAM User and Roles for Jenkins
+### Step 5: Configure AWS Credentials for Jenkins (Using Existing IAM User)
 
-**What you're doing:** Creating a dedicated AWS user that Jenkins will use to perform AWS operations (build images, create infrastructure, deploy to EKS). This is different from your personal CLI user.
+**What you're doing:** Generating an additional access key for your existing IAM user so Jenkins can perform AWS operations (build images, create infrastructure, deploy to EKS).
+
+> **Why not create a separate IAM user?** Some AWS accounts (e.g., lab/sandbox accounts, AWS Academy, or organization-managed accounts) do not grant permissions to create new IAM users. In such cases, you can reuse your existing IAM user's credentials for Jenkins. This is acceptable for development/learning environments.
+
+#### 5.1 — Verify Your Current IAM Identity and Permissions
 
 ```bash
-# Create the Jenkins IAM user
-aws iam create-user --user-name jenkins-cicd
+# Check who you are currently logged in as
+aws sts get-caller-identity
 
-# Expected output: JSON with the user details
+# Expected output:
+# {
+#     "UserId": "AIDAEXAMPLEID",
+#     "Account": "123456789012",
+#     "Arn": "arn:aws:iam::123456789012:user/your-username"
+# }
 ```
 
-Now attach the necessary permissions policies:
+#### 5.2 — Create an Access Key for Jenkins (Under Your Existing User)
+
 ```bash
-# Policy 1: Allows managing EKS clusters
-aws iam attach-user-policy \
-  --user-name jenkins-cicd \
-  --policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
-
-# Policy 2: Allows pushing/pulling Docker images to/from ECR
-aws iam attach-user-policy \
-  --user-name jenkins-cicd \
-  --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
-
-# Policy 3: Allows creating/managing EC2 instances
-aws iam attach-user-policy \
-  --user-name jenkins-cicd \
-  --policy-arn arn:aws:iam::aws:policy/AmazonEC2FullAccess
-
-# Policy 4: Allows creating/managing VPCs and networking
-aws iam attach-user-policy \
-  --user-name jenkins-cicd \
-  --policy-arn arn:aws:iam::aws:policy/AmazonVPCFullAccess
-
-# Policy 5: Allows accessing S3 (for Terraform state)
-aws iam attach-user-policy \
-  --user-name jenkins-cicd \
-  --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
-
-# Policy 6: Allows managing IAM roles (needed for EKS node roles)
-aws iam attach-user-policy \
-  --user-name jenkins-cicd \
-  --policy-arn arn:aws:iam::aws:policy/IAMFullAccess
-
-# Policy 7: Allows managing EKS node groups
-aws iam attach-user-policy \
-  --user-name jenkins-cicd \
-  --policy-arn arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
-```
-
-Create access keys for Jenkins to use:
-```bash
-aws iam create-access-key --user-name jenkins-cicd
+# Create a new access key pair for your existing IAM user
+# (each IAM user can have up to 2 active access keys)
+aws iam create-access-key
 
 # IMPORTANT: Save the output! You'll see something like:
 # {
 #     "AccessKey": {
-#         "UserName": "jenkins-cicd",
+#         "UserName": "your-username",
 #         "AccessKeyId": "AKIAIOSFODNN7EXAMPLE",
 #         "Status": "Active",
 #         "SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
@@ -534,233 +508,86 @@ aws iam create-access-key --user-name jenkins-cicd
 # }
 #
 # Copy BOTH AccessKeyId and SecretAccessKey — you'll enter these in Jenkins later.
-# The SecretAccessKey is shown ONLY ONCE. If lost, you must create new keys.
+# The SecretAccessKey is shown ONLY ONCE. If lost, you must delete and create new keys.
 ```
+
+> **Note:** If `aws iam create-access-key` also fails due to permissions, you can use the **AWS Console** instead:
+> 1. Log in to AWS Console → Click your username (top right) → **Security credentials**
+> 2. Scroll to **Access keys** → Click **Create access key**
+> 3. Select **"Command Line Interface (CLI)"** → Check acknowledgment → **Create**
+> 4. Download the `.csv` file or copy both keys immediately
+
+#### 5.3 — Verify Your Account Has the Required Permissions
+
+Your existing IAM user needs these permissions for the pipeline to work. Run this check:
+```bash
+# Test ECR access
+aws ecr describe-repositories --region ap-south-1 2>&1 | head -5
+
+# Test EC2 access
+aws ec2 describe-instances --region ap-south-1 --max-items 1 2>&1 | head -5
+
+# Test S3 access
+aws s3 ls 2>&1 | head -5
+
+# Test EKS access
+aws eks list-clusters --region ap-south-1 2>&1 | head -5
+```
+
+If any of these return "AccessDenied," contact your AWS account administrator to attach the relevant policies to your user:
+- `AmazonEKSClusterPolicy`
+- `AmazonEC2ContainerRegistryFullAccess`
+- `AmazonEC2FullAccess`
+- `AmazonVPCFullAccess`
+- `AmazonS3FullAccess`
+- `AmazonEKSWorkerNodePolicy`
+
+#### 5.4 — Alternative: Use EC2 Instance Role (Recommended for Production)
+
+If your Jenkins runs on an EC2 instance, the most secure approach is to attach an **IAM Instance Profile** (role) to the EC2 instance. This eliminates the need for access keys entirely:
+
+1. Go to **AWS Console → IAM → Roles → Create role**
+2. Trusted entity: **AWS service** → Use case: **EC2**
+3. Attach the required policies listed above
+4. Role name: `jenkins-ec2-role`
+5. Go to **EC2 → Instances** → Select Jenkins instance → **Actions → Security → Modify IAM role**
+6. Select `jenkins-ec2-role` → **Update IAM role**
+
+With an instance role, the Jenkins server automatically gets credentials — no access keys to manage or rotate.
 
 ---
 
-### Step 6: Launch and Configure Jenkins EC2 Instance
+### Step 6: Access Hosted Jenkins Instance
 
-**What you're doing:** Creating a virtual server (EC2 instance) in AWS that will run Jenkins — the automation engine that builds and deploys your app.
+**What you're doing:** Using the pre-configured Jenkins instance hosted by HeroVired at `https://jenkinsacademics.herovired.com`. Since Jenkins is already set up and running, you only need to log in and configure your pipeline — no EC2 instance provisioning, SSH, or tool installation required.
 
-#### 6.1 — Create a Security Group for Jenkins
+#### 6.1 — Log in to Jenkins
 
-1. Go to **AWS Console → EC2 → Security Groups → Create security group**
-2. Fill in:
-   - Security group name: `jenkins-sg`
-   - Description: `Security group for Jenkins server`
-   - VPC: Select the default VPC
-3. **Inbound Rules** — Click "Add rule" for each:
+1. Open your browser and go to: **https://jenkinsacademics.herovired.com**
+2. Log in with your HeroVired credentials (provided by your instructor)
+3. You should see the Jenkins Dashboard
 
-   | Type | Port | Source | Description |
-   |------|------|--------|-------------|
-   | SSH | 22 | My IP | SSH access from your machine |
-   | Custom TCP | 8080 | 0.0.0.0/0 | Jenkins web UI |
+> **Note:** Since this is a shared hosted Jenkins, Docker, kubectl, AWS CLI, Terraform, and Ansible are already pre-installed on the server. You do NOT need to install any tools manually.
 
-4. Click **"Create security group"**
+#### 6.2 — Configure AWS Credentials on Hosted Jenkins
 
-#### 6.2 — Launch the EC2 Instance
-
-1. Go to **AWS Console → EC2 → Launch instance**
-2. Fill in:
-   - **Name:** `Jenkins-Server`
-   - **AMI:** Ubuntu Server 22.04 LTS (Free Tier eligible — select the 64-bit x86 version)
-   - **Instance type:** `t3.medium` (2 vCPU, 4GB RAM — Jenkins needs at least this)
-     - ⚠️ Note: `t3.medium` is NOT Free Tier; costs ~$0.04/hour. Use `t2.micro` for testing only.
-   - **Key pair:** Click "Create new key pair"
-     - Name: `jenkins-key`
-     - Type: RSA
-     - Format: `.pem` (for Linux/Mac) or `.ppk` (for Windows PuTTY)
-     - Click "Create key pair" — the file will download automatically
-   - **Network settings:** Click "Edit"
-     - Select existing security group: `jenkins-sg`
-   - **Storage:** 30 GB gp3 (default 8GB is too small for Docker images)
-3. Click **"Launch instance"**
-4. Wait 1-2 minutes for the instance to start
-5. Go to **EC2 → Instances** and find your instance
-6. Note the **Public IPv4 address** (e.g., `13.232.100.50`) — you'll need this
-
-#### 6.3 — SSH into the Jenkins Instance
-
-**On Windows (using PowerShell or Git Bash):**
-```bash
-# Make sure your key file has restricted permissions
-# In PowerShell:
-icacls jenkins-key.pem /inheritance:r /grant:r "$($env:USERNAME):(R)"
-
-# Connect via SSH (replace the IP with your instance's public IP)
-ssh -i jenkins-key.pem ubuntu@13.232.100.50
-
-# If prompted "Are you sure you want to continue connecting?" type: yes
-```
-
-**On macOS/Linux:**
-```bash
-chmod 400 jenkins-key.pem
-ssh -i jenkins-key.pem ubuntu@13.232.100.50
-```
-
-#### 6.4 — Install Jenkins and All Required Tools
-
-Once SSH'd into the instance, run these commands one section at a time:
-
-```bash
-# ============================================
-# SECTION 1: System Update
-# ============================================
-sudo apt update && sudo apt upgrade -y
-
-# ============================================
-# SECTION 2: Install Java 17 (Jenkins requires Java)
-# ============================================
-sudo apt install -y openjdk-17-jdk
-
-# Verify Java is installed
-java -version
-# Expected: openjdk version "17.x.x"
-
-# ============================================
-# SECTION 3: Install Jenkins
-# ============================================
-# Add Jenkins repository key
-curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
-
-# Add Jenkins repository
-echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/ | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
-
-# Install Jenkins
-sudo apt update
-sudo apt install -y jenkins
-
-# Start Jenkins and enable it to start on boot
-sudo systemctl start jenkins
-sudo systemctl enable jenkins
-
-# Verify Jenkins is running
-sudo systemctl status jenkins
-# Look for "Active: active (running)" in the output
-# Press 'q' to exit the status view
-
-# ============================================
-# SECTION 4: Install Docker
-# ============================================
-sudo apt install -y docker.io
-
-# Allow Jenkins user to run Docker commands
-sudo usermod -aG docker jenkins
-sudo usermod -aG docker ubuntu
-
-# Restart Jenkins to pick up the new group membership
-sudo systemctl restart jenkins
-
-# Verify Docker works
-sudo docker run hello-world
-# Expected: "Hello from Docker!" message
-
-# ============================================
-# SECTION 5: Install kubectl (Kubernetes CLI)
-# ============================================
-curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
-sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-
-# Verify
-kubectl version --client
-# Expected: Client Version: v1.28.0
-
-# ============================================
-# SECTION 6: Install AWS CLI
-# ============================================
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-sudo apt install -y unzip
-unzip awscliv2.zip
-sudo ./aws/install
-
-# Verify
-aws --version
-# Expected: aws-cli/2.x.x ...
-
-# ============================================
-# SECTION 7: Install Terraform
-# ============================================
-sudo apt install -y gnupg software-properties-common
-wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
-echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-sudo apt update && sudo apt install -y terraform
-
-# Verify
-terraform version
-# Expected: Terraform v1.x.x
-
-# ============================================
-# SECTION 8: Install Ansible
-# ============================================
-sudo apt install -y ansible
-
-# Verify
-ansible --version
-# Expected: ansible [core 2.x.x]
-
-# ============================================
-# SECTION 9: Install Git
-# ============================================
-sudo apt install -y git
-git --version
-```
-
-#### 6.5 — Configure AWS Credentials on Jenkins Server
-
-This allows Jenkins to interact with AWS services:
-```bash
-# Switch to the Jenkins user
-sudo su - jenkins
-
-# Configure AWS CLI for Jenkins user
-aws configure
-# Enter the jenkins-cicd Access Key ID from Step 5
-# Enter the jenkins-cicd Secret Access Key from Step 5
-# Region: ap-south-1
-# Output: json
-
-# Verify it works
-aws sts get-caller-identity
-# Should show the jenkins-cicd user
-
-# Exit back to ubuntu user
-exit
-```
+Since you cannot SSH into the hosted Jenkins server, AWS credentials must be configured via the Jenkins UI (covered in Step 7.3). The hosted Jenkins will use these credentials when running pipeline stages that interact with AWS.
 
 ---
 
 ### Step 7: Configure Jenkins via Web UI
 
-**What you're doing:** Setting up Jenkins through its web interface — installing plugins, adding credentials, and creating the pipeline job.
+**What you're doing:** Setting up Jenkins through its web interface — adding credentials and creating the pipeline job.
 
-#### 7.1 — Initial Jenkins Setup
+> **Jenkins URL:** https://jenkinsacademics.herovired.com
 
-1. Open your browser and go to: `http://<YOUR_EC2_PUBLIC_IP>:8080`
-   - Example: `http://13.232.100.50:8080`
-   - You should see "Unlock Jenkins" page
+#### 7.1 — Log in to Jenkins
 
-2. Get the initial admin password (run on the EC2 instance):
-   ```bash
-   sudo cat /var/lib/jenkins/secrets/initialAdminPassword
-   ```
-   Copy the long string of characters shown.
+1. Open your browser and go to: **https://jenkinsacademics.herovired.com**
+2. Log in with your HeroVired-provided credentials
+3. You should see the Jenkins Dashboard
 
-3. Paste the password into the browser and click **"Continue"**
-
-4. Click **"Install suggested plugins"** — wait for all plugins to install
-
-5. Create your admin user:
-   - Username: `admin`
-   - Password: Choose a strong password (save it!)
-   - Full name: Your Name
-   - Email: your@email.com
-   - Click **"Save and Continue"**
-
-6. Jenkins URL: Leave the default (`http://<IP>:8080/`) → Click **"Save and Finish"**
-
-7. Click **"Start using Jenkins"**
+> **Note:** Since this is a pre-configured hosted instance, initial setup (plugins, admin user creation) has already been done by the administrator. Skip directly to adding credentials.
 
 #### 7.2 — Install Additional Required Plugins
 
@@ -958,43 +785,30 @@ aws ecr describe-repositories --region ap-south-1 --query "repositories[].reposi
 
 ### Step 10: Update Ansible Inventory with Actual IP
 
-**What you're doing:** Telling Ansible which server to configure by providing the actual IP address of the Jenkins EC2 instance.
+**What you're doing:** Telling Ansible which server to configure. Since Jenkins is hosted externally (`https://jenkinsacademics.herovired.com`), the Ansible inventory should point to any EC2 worker nodes you manage (e.g., EKS worker nodes or a bastion host). If Ansible configuration is handled entirely within the Jenkins pipeline (which runs on the hosted Jenkins server), you may skip this step.
 
-#### 10.1 — Get the EC2 Instance Public IP
+#### 10.1 — Get the Target EC2 Instance Public IP
 ```bash
-# If you don't remember the IP, find it with:
+# List running EC2 instances in your account
 aws ec2 describe-instances \
-  --filters "Name=tag:Name,Values=Jenkins-Server" "Name=instance-state-name,Values=running" \
-  --query "Reservations[].Instances[].PublicIpAddress" \
-  --output text \
+  --filters "Name=instance-state-name,Values=running" \
+  --query "Reservations[].Instances[].[Tags[?Key=='Name'].Value|[0],PublicIpAddress]" \
+  --output table \
   --region ap-south-1
-
-# Or simply check the AWS Console → EC2 → Instances
 ```
 
 #### 10.2 — Edit the Ansible Inventory File
-Open `ansible/inventory/dev/hosts.ini` and replace the placeholder IP:
+Open `ansible/inventory/dev/hosts.ini` and replace the placeholder IP with the target instance:
 
 ```ini
 [webservers]
-13.232.100.50 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/jenkins-key.pem
+<YOUR_EC2_IP> ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/jenkins-key.pem
 
 [all:vars]
 ansible_python_interpreter=/usr/bin/python3
 ```
 
-Replace `13.232.100.50` with YOUR EC2 instance's actual public IP.
-
-#### 10.3 — Copy SSH Key to Jenkins Server (for Ansible)
-```bash
-# Copy your key to the Jenkins server so Ansible can use it
-scp -i jenkins-key.pem jenkins-key.pem ubuntu@13.232.100.50:~/.ssh/
-
-# SSH in and set permissions
-ssh -i jenkins-key.pem ubuntu@13.232.100.50
-chmod 400 ~/.ssh/jenkins-key.pem
-exit
-```
+> **Note:** If the hosted Jenkins pipeline handles Ansible execution, you'll need to ensure the SSH private key is added as a Jenkins credential (Kind: SSH Username with private key) so the pipeline can reach your target servers.
 
 ---
 
@@ -1056,23 +870,7 @@ kubectl get secrets -n travelmemory
 > **Security Note:** Never commit secrets to Git. The secret is stored encrypted in the Kubernetes cluster. The `backend-deployment.yml` references this secret to inject the MongoDB URI as an environment variable into the backend containers.
 
 #### 11.4 — Also Configure kubectl on the Jenkins Server
-SSH into your Jenkins EC2 and run the same kubeconfig command:
-```bash
-ssh -i jenkins-key.pem ubuntu@13.232.100.50
-
-# Switch to Jenkins user
-sudo su - jenkins
-
-# Configure kubectl for Jenkins user
-aws eks update-kubeconfig --name travelmemory-eks --region ap-south-1
-
-# Verify
-kubectl get nodes
-# Should show the same nodes
-
-exit  # Exit jenkins user
-exit  # Exit SSH
-```
+Since you're using the hosted Jenkins at `https://jenkinsacademics.herovired.com`, kubectl configuration is handled automatically via the AWS credentials you added in Jenkins (Step 7.3). The pipeline's `aws eks update-kubeconfig` command in the Jenkinsfile will configure kubectl at runtime using those credentials.
 
 ---
 
@@ -1080,9 +878,8 @@ exit  # Exit SSH
 
 **What you're doing:** Setting up GitHub to notify Jenkins every time code is pushed. This triggers the pipeline automatically — no manual intervention needed.
 
-#### 12.1 — Ensure Jenkins is Accessible from Internet
-- Your Jenkins Security Group (Step 6.1) must allow inbound port 8080 from `0.0.0.0/0`
-- Verify by accessing `http://<JENKINS_IP>:8080` from your browser
+#### 12.1 — Ensure Jenkins is Accessible from GitHub
+- The hosted Jenkins at `https://jenkinsacademics.herovired.com` is already publicly accessible via HTTPS — no security group changes needed.
 
 #### 12.2 — Add Webhook in GitHub
 1. Go to your GitHub repository: `https://github.com/manjulachukki/TravelMemoryMainGE`
@@ -1090,8 +887,7 @@ exit  # Exit SSH
 3. Click **Webhooks** in the left sidebar
 4. Click **"Add webhook"**
 5. Fill in:
-   - **Payload URL:** `http://<YOUR_JENKINS_EC2_IP>:8080/github-webhook/`
-     - Example: `http://13.232.100.50:8080/github-webhook/`
+   - **Payload URL:** `https://jenkinsacademics.herovired.com/github-webhook/`
      - ⚠️ Don't forget the trailing `/`
    - **Content type:** `application/json`
    - **Which events would you like to trigger this webhook?**
@@ -1105,9 +901,8 @@ exit  # Exit SSH
 3. Scroll down to **"Recent Deliveries"**
 4. You should see a delivery with a green checkmark (✓ = 200 response)
 5. If you see a red X, check:
-   - Is the Jenkins URL correct?
-   - Is port 8080 open in the security group?
-   - Is Jenkins running?
+   - Is the Payload URL correct (with trailing `/`)?
+   - Is the Jenkins job configured with "GitHub hook trigger for GITScm polling"?
 
 ---
 
@@ -1116,7 +911,7 @@ exit  # Exit SSH
 **What you're doing:** Triggering the full CI/CD pipeline for the first time to build, deploy, and verify everything works end-to-end.
 
 #### 13.1 — Trigger Manually (Recommended for First Run)
-1. Go to Jenkins: `http://<JENKINS_IP>:8080`
+1. Go to Jenkins: **https://jenkinsacademics.herovired.com**
 2. Click on `travelmemory-pipeline`
 3. Click **"Build Now"** (left sidebar)
 4. Click on the build number (e.g., `#1`) in the build history

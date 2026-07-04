@@ -458,12 +458,12 @@ aws s3 ls | grep travelmemory
 3. Driver: **Node.js**, Version: **5.5 or later**
 4. Copy the connection string. It looks like:
    ```
-   mongodb+srv://travelmemory-app:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+  mongodb+srv://admin:<db_password>@cluster0.oh8heqs.mongodb.net/?appName=Cluster0
    ```
 5. Replace `<password>` with the password you saved in step 4.3
 6. Add the database name before the `?`:
    ```
-   mongodb+srv://travelmemory-app:YOUR_PASSWORD@cluster0.xxxxx.mongodb.net/travelmemory?retryWrites=true&w=majority
+   mongodb+srv://admin:<db_password>@cluster0.oh8heqs.mongodb.net/test?appName=Cluster0
    ```
 7. **Save this complete connection string** — you'll need it in Step 10.
 

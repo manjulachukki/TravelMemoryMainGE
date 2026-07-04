@@ -38,6 +38,24 @@ data:
         kubernetes_sd_configs:
           - role: node
 
+      - job_name: 'kubernetes-cadvisor'
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
+
       - job_name: 'kubernetes-pods'
         kubernetes_sd_configs:
           - role: pod
@@ -55,16 +73,19 @@ data:
             replacement: $1:$2
             target_label: __address__
 
-      - job_name: 'travelmemory-backend'
+      - job_name: 'node-exporter'
         kubernetes_sd_configs:
           - role: endpoints
             namespaces:
               names:
-                - travelmemory
+                - monitoring
         relabel_configs:
-          - source_labels: [__meta_kubernetes_service_label_tier]
+          - source_labels: [__meta_kubernetes_service_label_app]
             action: keep
-            regex: backend
+            regex: node-exporter
+
+      # travelmemory-backend job removed: the Node.js backend has no /metrics endpoint.
+      # Container CPU/memory metrics for travelmemory pods come from kubernetes-cadvisor above.
 
   alert-rules.yml: |
     groups:
